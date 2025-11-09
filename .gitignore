@@ -1,4 +1,5 @@
 .claude/
 .gocache/
-.DS_Store*
+.DS_Store
 abs-mcp
+.github/.DS_Store
