@@ -1,3 +1,4 @@
 .claude/
 .gocache/
+.DS_Store*
 abs-mcp
