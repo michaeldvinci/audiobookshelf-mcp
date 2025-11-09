@@ -73,6 +73,32 @@ func createSimpleGETHandler(path string) func(context.Context, mcp.CallToolReque
 	}
 }
 
+// Helper to create a GET handler for root-level endpoints (without /api prefix)
+func createRootGETHandler(path string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURLParam := request.GetString("base_url", "")
+		tokenParam := request.GetString("token", "")
+
+		baseURL := getEnvOrParam(baseURLParam, "ABS_BASE_URL")
+		token := getEnvOrParam(tokenParam, "ABS_API_KEY")
+
+		if baseURL == "" {
+			return mcp.NewToolResultError("base_url parameter or ABS_BASE_URL environment variable is required"), nil
+		}
+		if token == "" {
+			return mcp.NewToolResultError("token parameter or ABS_API_KEY environment variable is required"), nil
+		}
+
+		// Don't append /api for root-level endpoints
+		body, err := absGET(ctx, baseURL, token, path)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	}
+}
+
 // Helper to create a GET handler with an ID parameter
 func createGETByIDHandler(pathTemplate, idParamName string) func(context.Context, mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	return func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
@@ -182,6 +208,7 @@ func main() {
 		mcp.WithBoolean("personalized", mcp.Description("Include personalized view for the library")),
 		mcp.WithBoolean("filterdata", mcp.Description("Include filter data for the library")),
 		mcp.WithBoolean("stats", mcp.Description("Include library statistics")),
+		mcp.WithBoolean("search", mcp.Description("Search the library items")),
 		mcp.WithBoolean("episode-downloads", mcp.Description("Include episode downloads for the library")),
 		mcp.WithBoolean("recent-episodes", mcp.Description("Include recent episodes for the library")),
 	)
@@ -261,6 +288,64 @@ func main() {
 	)
 	playlistTool := mcp.NewTool("playlist", playlistOpts...)
 
+	// Server status/health tools
+	pingOpts := append(withABSAuth(), mcp.WithDescription("Simple health check endpoint"))
+	pingTool := mcp.NewTool("ping", pingOpts...)
+
+	healthcheckOpts := append(withABSAuth(), mcp.WithDescription("Server health verification endpoint"))
+	healthcheckTool := mcp.NewTool("healthcheck", healthcheckOpts...)
+
+	statusOpts := append(withABSAuth(), mcp.WithDescription("Get server initialization status and configuration"))
+	statusTool := mcp.NewTool("status", statusOpts...)
+
+	// Users tools
+	usersOpts := append(withABSAuth(), mcp.WithDescription("List all Audiobookshelf users"))
+	usersTool := mcp.NewTool("users", usersOpts...)
+
+	usersOnlineOpts := append(withABSAuth(), mcp.WithDescription("Get currently online users"))
+	usersOnlineTool := mcp.NewTool("users_online", usersOnlineOpts...)
+
+	userOpts := append(withABSAuth(),
+		mcp.WithDescription("Retrieve a single user by ID, optionally with sub-resources"),
+		mcp.WithString("user_id", mcp.Required(), mcp.Description("User identifier to fetch")),
+		mcp.WithBoolean("listening-sessions", mcp.Description("Get listening sessions for the user")),
+		mcp.WithBoolean("listening-stats", mcp.Description("Get listening statistics for the user")),
+	)
+	userTool := mcp.NewTool("user", userOpts...)
+
+	// Series tools
+	seriesOpts := append(withABSAuth(),
+		mcp.WithDescription("Retrieve a single series by ID"),
+		mcp.WithString("series_id", mcp.Required(), mcp.Description("Series identifier to fetch")),
+	)
+	seriesTool := mcp.NewTool("series", seriesOpts...)
+
+	// Author image tool
+	authorImageOpts := append(withABSAuth(),
+		mcp.WithDescription("Retrieve author image by ID"),
+		mcp.WithString("author_id", mcp.Required(), mcp.Description("Author identifier")),
+	)
+	authorImageTool := mcp.NewTool("author_image", authorImageOpts...)
+
+	// Backups tools
+	backupsOpts := append(withABSAuth(), mcp.WithDescription("List all server backups"))
+	backupsTool := mcp.NewTool("backups", backupsOpts...)
+
+	// Filesystem tools
+	filesystemOpts := append(withABSAuth(), mcp.WithDescription("List available filesystem paths"))
+	filesystemTool := mcp.NewTool("filesystem", filesystemOpts...)
+
+	// Authorize tools
+	authorizeOpts := append(withABSAuth(), mcp.WithDescription("Get authorized user and server information"))
+	authorizeTool := mcp.NewTool("authorize", authorizeOpts...)
+
+	// Tags and Genres tools
+	tagsOpts := append(withABSAuth(), mcp.WithDescription("Get all library tags"))
+	tagsTool := mcp.NewTool("tags", tagsOpts...)
+
+	genresOpts := append(withABSAuth(), mcp.WithDescription("Get all available genres"))
+	genresTool := mcp.NewTool("genres", genresOpts...)
+
 	// Add ABS Libraries handlers
 	s.AddTool(librariesTool, createSimpleGETHandler("/libraries"))
 	s.AddTool(libraryTool, createGETByIDWithSubResourceHandler("/libraries/%s", "library_id", []string{
@@ -272,6 +357,7 @@ func main() {
 		"personalized",
 		"filterdata",
 		"stats",
+		"search",
 		"episode-downloads",
 		"recent-episodes",
 	}))
@@ -381,6 +467,38 @@ func main() {
 	// Add ABS Playlists handlers
 	s.AddTool(playlistsTool, createSimpleGETHandler("/playlists"))
 	s.AddTool(playlistTool, createGETByIDHandler("/playlists/%s", "playlist_id"))
+
+	// Add Server status/health handlers (these are at root level, not /api)
+	s.AddTool(pingTool, createRootGETHandler("/ping"))
+	s.AddTool(healthcheckTool, createRootGETHandler("/healthcheck"))
+	s.AddTool(statusTool, createRootGETHandler("/status"))
+
+	// Add Users handlers
+	s.AddTool(usersTool, createSimpleGETHandler("/users"))
+	s.AddTool(usersOnlineTool, createSimpleGETHandler("/users/online"))
+	s.AddTool(userTool, createGETByIDWithSubResourceHandler("/users/%s", "user_id", []string{
+		"listening-sessions",
+		"listening-stats",
+	}))
+
+	// Add Series handler
+	s.AddTool(seriesTool, createGETByIDHandler("/series/%s", "series_id"))
+
+	// Add Author image handler
+	s.AddTool(authorImageTool, createGETByIDHandler("/authors/%s/image", "author_id"))
+
+	// Add Backups handler
+	s.AddTool(backupsTool, createSimpleGETHandler("/backups"))
+
+	// Add Filesystem handler
+	s.AddTool(filesystemTool, createSimpleGETHandler("/filesystem"))
+
+	// Add Authorize handler
+	s.AddTool(authorizeTool, createSimpleGETHandler("/authorize"))
+
+	// Add Tags and Genres handlers
+	s.AddTool(tagsTool, createSimpleGETHandler("/tags"))
+	s.AddTool(genresTool, createSimpleGETHandler("/genres"))
 
 	// Start the server
 	if err := server.ServeStdio(s); err != nil {
