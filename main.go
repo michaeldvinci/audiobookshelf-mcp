@@ -172,17 +172,27 @@ func main() {
 	librariesTool := mcp.NewTool("libraries", librariesOpts...)
 
 	libraryOpts := append(withABSAuth(),
-		mcp.WithDescription("Retrieve a single Audiobookshelf library by ID, optionally with items or authors"),
+		mcp.WithDescription("Retrieve a single Audiobookshelf library by ID, optionally with sub-resources"),
 		mcp.WithString("library_id", mcp.Required(), mcp.Description("Library identifier to fetch")),
 		mcp.WithBoolean("items", mcp.Description("Include all items in the library")),
 		mcp.WithBoolean("authors", mcp.Description("Include all authors in the library")),
+		mcp.WithBoolean("series", mcp.Description("Include all series in the library")),
+		mcp.WithBoolean("collections", mcp.Description("Include all collections in the library")),
+		mcp.WithBoolean("playlists", mcp.Description("Include all playlists in the library")),
+		mcp.WithBoolean("personalized", mcp.Description("Include personalized view for the library")),
+		mcp.WithBoolean("filterdata", mcp.Description("Include filter data for the library")),
+		mcp.WithBoolean("stats", mcp.Description("Include library statistics")),
+		mcp.WithBoolean("episode-downloads", mcp.Description("Include episode downloads for the library")),
+		mcp.WithBoolean("recent-episodes", mcp.Description("Include recent episodes for the library")),
 	)
 	libraryTool := mcp.NewTool("library", libraryOpts...)
 
 	// Items tools
 	itemOpts := append(withABSAuth(),
-		mcp.WithDescription("Retrieve a single Audiobookshelf item (audiobook or podcast) by ID"),
+		mcp.WithDescription("Retrieve a single Audiobookshelf item (audiobook or podcast) by ID, optionally with sub-resources"),
 		mcp.WithString("item_id", mcp.Required(), mcp.Description("Item identifier to fetch")),
+		mcp.WithBoolean("cover", mcp.Description("Include cover image for the item")),
+		mcp.WithBoolean("tone-object", mcp.Description("Include tone object for the item")),
 	)
 	itemTool := mcp.NewTool("item", itemOpts...)
 
@@ -194,8 +204,42 @@ func main() {
 	authorTool := mcp.NewTool("author", authorOpts...)
 
 	// User tools
-	meOpts := append(withABSAuth(), mcp.WithDescription("Get authenticated user information"))
+	meOpts := append(withABSAuth(),
+		mcp.WithDescription("Get authenticated user information, or fetch specific user sub-resources"),
+		mcp.WithBoolean("listening-sessions", mcp.Description("Get listening sessions for the user")),
+		mcp.WithBoolean("listening-stats", mcp.Description("Get listening statistics for the user")),
+		mcp.WithBoolean("items-in-progress", mcp.Description("Get items currently in progress for the user")),
+		mcp.WithString("progress_item_id", mcp.Description("Get progress for a specific library item ID")),
+		mcp.WithString("progress_episode_id", mcp.Description("Get progress for a specific episode ID (requires progress_item_id)")),
+	)
 	meTool := mcp.NewTool("me", meOpts...)
+
+	// Sessions tools
+	sessionsOpts := append(withABSAuth(), mcp.WithDescription("List all playback sessions"))
+	sessionsTool := mcp.NewTool("sessions", sessionsOpts...)
+
+	sessionOpts := append(withABSAuth(),
+		mcp.WithDescription("Retrieve a single playback session by ID"),
+		mcp.WithString("session_id", mcp.Required(), mcp.Description("Session identifier to fetch")),
+	)
+	sessionTool := mcp.NewTool("session", sessionOpts...)
+
+	// Podcasts tools
+	podcastsOpts := append(withABSAuth(),
+		mcp.WithDescription("List all podcasts, or fetch podcast-related resources"),
+		mcp.WithBoolean("feed", mcp.Description("Get podcast RSS feed")),
+		mcp.WithBoolean("opml", mcp.Description("Get podcast OPML export")),
+	)
+	podcastsTool := mcp.NewTool("podcasts", podcastsOpts...)
+
+	podcastOpts := append(withABSAuth(),
+		mcp.WithDescription("Retrieve a single podcast by ID, or fetch podcast sub-resources"),
+		mcp.WithString("podcast_id", mcp.Required(), mcp.Description("Podcast identifier to fetch")),
+		mcp.WithBoolean("downloads", mcp.Description("Get downloads for the podcast")),
+		mcp.WithBoolean("search-episode", mcp.Description("Search for episodes in the podcast")),
+		mcp.WithString("episode_id", mcp.Description("Get a specific episode by ID")),
+	)
+	podcastTool := mcp.NewTool("podcast", podcastOpts...)
 
 	// Collections tools
 	collectionsOpts := append(withABSAuth(), mcp.WithDescription("List all Audiobookshelf collections"))
@@ -219,16 +263,116 @@ func main() {
 
 	// Add ABS Libraries handlers
 	s.AddTool(librariesTool, createSimpleGETHandler("/libraries"))
-	s.AddTool(libraryTool, createGETByIDWithSubResourceHandler("/libraries/%s", "library_id", []string{"items", "authors"}))
+	s.AddTool(libraryTool, createGETByIDWithSubResourceHandler("/libraries/%s", "library_id", []string{
+		"items",
+		"authors",
+		"series",
+		"collections",
+		"playlists",
+		"personalized",
+		"filterdata",
+		"stats",
+		"episode-downloads",
+		"recent-episodes",
+	}))
 
 	// Add ABS Items handlers
-	s.AddTool(itemTool, createGETByIDHandler("/items/%s", "item_id"))
+	s.AddTool(itemTool, createGETByIDWithSubResourceHandler("/items/%s", "item_id", []string{
+		"cover",
+		"tone-object",
+	}))
 
 	// Add ABS Authors handlers
 	s.AddTool(authorTool, createGETByIDHandler("/authors/%s", "author_id"))
 
 	// Add ABS Me handler
-	s.AddTool(meTool, createSimpleGETHandler("/me"))
+	s.AddTool(meTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		path := "/me"
+
+		// Check for simple boolean sub-resources first
+		if request.GetBool("listening-sessions", false) {
+			path = "/me/listening-sessions"
+		} else if request.GetBool("listening-stats", false) {
+			path = "/me/listening-stats"
+		} else if request.GetBool("items-in-progress", false) {
+			path = "/me/items-in-progress"
+		} else if progressItemID := request.GetString("progress_item_id", ""); progressItemID != "" {
+			// Handle progress endpoints with IDs
+			if progressEpisodeID := request.GetString("progress_episode_id", ""); progressEpisodeID != "" {
+				path = fmt.Sprintf("/me/progress/%s/%s", progressItemID, progressEpisodeID)
+			} else {
+				path = fmt.Sprintf("/me/progress/%s", progressItemID)
+			}
+		}
+
+		body, err := absGET(ctx, baseURL, token, path)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
+
+	// Add ABS Sessions handlers
+	s.AddTool(sessionsTool, createSimpleGETHandler("/sessions"))
+	s.AddTool(sessionTool, createGETByIDHandler("/sessions/%s", "session_id"))
+
+	// Add ABS Podcasts handlers
+	s.AddTool(podcastsTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		path := "/podcasts"
+
+		if request.GetBool("feed", false) {
+			path = "/podcasts/feed"
+		} else if request.GetBool("opml", false) {
+			path = "/podcasts/opml"
+		}
+
+		body, err := absGET(ctx, baseURL, token, path)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
+
+	s.AddTool(podcastTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		podcastID, err := request.RequireString("podcast_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		path := fmt.Sprintf("/podcasts/%s", podcastID)
+
+		if request.GetBool("downloads", false) {
+			path = fmt.Sprintf("/podcasts/%s/downloads", podcastID)
+		} else if request.GetBool("search-episode", false) {
+			path = fmt.Sprintf("/podcasts/%s/search-episode", podcastID)
+		} else if episodeID := request.GetString("episode_id", ""); episodeID != "" {
+			path = fmt.Sprintf("/podcasts/%s/episode/%s", podcastID, episodeID)
+		}
+
+		body, err := absGET(ctx, baseURL, token, path)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
 
 	// Add ABS Collections handlers
 	s.AddTool(collectionsTool, createSimpleGETHandler("/collections"))

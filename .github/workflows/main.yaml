@@ -29,11 +29,11 @@ jobs:
             - name: Run tests
               run: go test -v ./...
 
-            - name: Build abs-mcp
+            - name: Build abs-mcp (validate, non-tags)
               if: ${{ !startsWith(github.ref, 'refs/tags/') }}
               run: go build -v -o abs-mcp main.go
 
-            - name: Run GoReleaser
+            - name: Run GoReleaser (tags only)
               if: startsWith(github.ref, 'refs/tags/')
               uses: goreleaser/goreleaser-action@v6
               with:

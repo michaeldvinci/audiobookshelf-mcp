@@ -14,11 +14,50 @@ A Model Context Protocol (MCP) server that provides tools to interact with your 
 
 ### Prerequisites
 
-- Go 1.21 or later
 - An Audiobookshelf instance with API access
 - An API token from your Audiobookshelf instance
 
-### Build from Source
+### Recommended: Download Pre-built Release
+
+**The easiest way to install is to download a pre-built binary from the [latest release](https://github.com/your-username/abs-mcp/releases/latest).**
+
+| Platform | Architecture | Filename |
+|----------|-------------|----------|
+| macOS | Intel (x86_64) | `audiobookshelf-mcp_VERSION_darwin_amd64.tar.gz` |
+| macOS | Apple Silicon (ARM64) | `audiobookshelf-mcp_VERSION_darwin_arm64.tar.gz` |
+| Linux | 64-bit (x86_64) | `audiobookshelf-mcp_VERSION_linux_amd64.tar.gz` |
+| Linux | ARM64 | `audiobookshelf-mcp_VERSION_linux_arm64.tar.gz` |
+| Linux | 32-bit (x86) | `audiobookshelf-mcp_VERSION_linux_386.tar.gz` |
+| Windows | 64-bit (x86_64) | `audiobookshelf-mcp_VERSION_windows_amd64.tar.gz` |
+| Windows | ARM64 | `audiobookshelf-mcp_VERSION_windows_arm64.tar.gz` |
+| Windows | 32-bit (x86) | `audiobookshelf-mcp_VERSION_windows_386.tar.gz` |
+
+**Installation steps:**
+
+1. Download the appropriate archive for your platform from the releases page
+2. Extract the archive:
+   ```bash
+   tar -xzf audiobookshelf-mcp_VERSION_PLATFORM.tar.gz
+   ```
+3. Move the binary to a location in your PATH (optional but recommended):
+   ```bash
+   # macOS/Linux
+   sudo mv abs-mcp /usr/local/bin/
+
+   # Or to a user directory
+   mv abs-mcp ~/.local/bin/
+   ```
+4. Make it executable (macOS/Linux):
+   ```bash
+   chmod +x /usr/local/bin/abs-mcp
+   ```
+
+### Alternative: Build from Source
+
+If you prefer to build from source:
+
+**Prerequisites:**
+- Go 1.21 or later
 
 ```bash
 git clone <repository-url>
@@ -101,13 +140,23 @@ Add this to your Claude Desktop configuration file:
 ### Libraries
 
 - **libraries** - List all libraries
-- **library** - Get a single library by ID
-  - Optional: `items=true` - Include all items in the library
-  - Optional: `authors=true` - Include all authors in the library
+- **library** - Get a single library by ID, or fetch specific library sub-resources:
+  - `items=true` - Get all items in the library
+  - `authors=true` - Get all authors in the library
+  - `series=true` - Get all series in the library
+  - `collections=true` - Get all collections in the library
+  - `playlists=true` - Get all playlists in the library
+  - `personalized=true` - Get personalized view for the library
+  - `filterdata=true` - Get filter data for the library
+  - `stats=true` - Get library statistics
+  - `episode-downloads=true` - Get episode downloads for the library
+  - `recent-episodes=true` - Get recent episodes for the library
 
 ### Items
 
-- **item** - Get a single item (audiobook or podcast) by ID
+- **item** - Get a single item (audiobook or podcast) by ID, or fetch specific item sub-resources:
+  - `cover=true` - Get the cover image for the item
+  - `tone-object=true` - Get the tone object for the item
 
 ### Authors
 
@@ -125,7 +174,27 @@ Add this to your Claude Desktop configuration file:
 
 ### User
 
-- **me** - Get authenticated user information
+- **me** - Get authenticated user information, or fetch specific user sub-resources:
+  - `listening-sessions=true` - Get listening sessions for the user
+  - `listening-stats=true` - Get listening statistics for the user
+  - `items-in-progress=true` - Get items currently in progress for the user
+  - `progress_item_id=<id>` - Get progress for a specific library item
+  - `progress_item_id=<id>` + `progress_episode_id=<id>` - Get progress for a specific episode
+
+### Sessions
+
+- **sessions** - List all playback sessions
+- **session** - Get a single playback session by ID
+
+### Podcasts
+
+- **podcasts** - List all podcasts, or fetch podcast-related resources:
+  - `feed=true` - Get podcast RSS feed
+  - `opml=true` - Get podcast OPML export
+- **podcast** - Get a single podcast by ID, or fetch podcast sub-resources:
+  - `downloads=true` - Get downloads for the podcast
+  - `search-episode=true` - Search for episodes in the podcast
+  - `episode_id=<id>` - Get a specific episode by ID
 
 ## Tool Parameters
 
