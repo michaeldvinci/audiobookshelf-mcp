@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -183,6 +185,47 @@ func absGET(ctx context.Context, baseURL, token, path string) ([]byte, error) {
 	return body, nil
 }
 
+func absPOST(ctx context.Context, baseURL, token, path string, payload interface{}) ([]byte, error) {
+	fullURL := strings.TrimSuffix(baseURL, "/") + path
+
+	var bodyReader io.Reader
+	if payload != nil {
+		jsonData, err := json.Marshal(payload)
+		if err != nil {
+			return nil, fmt.Errorf("marshal payload: %w", err)
+		}
+		bodyReader = bytes.NewBuffer(jsonData)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("call ABS API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("ABS API returned %s: %s", resp.Status, string(body))
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	return body, nil
+}
+
 func main() {
 	// Create a new MCP server
 	s := server.NewMCPServer(
@@ -213,6 +256,17 @@ func main() {
 		mcp.WithBoolean("recent-episodes", mcp.Description("Include recent episodes for the library")),
 	)
 	libraryTool := mcp.NewTool("library", libraryOpts...)
+
+	// Create library tool
+	createLibraryOpts := append(withABSAuth(),
+		mcp.WithDescription("Create a new Audiobookshelf library"),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Library name")),
+		mcp.WithString("folders", mcp.Required(), mcp.Description("Comma-separated list of folder paths for the library")),
+		mcp.WithString("media_type", mcp.Required(), mcp.Description("Media type: book or podcast")),
+		mcp.WithString("icon", mcp.Description("Library icon (default: database)")),
+		mcp.WithString("provider", mcp.Description("Metadata provider (default: google)")),
+	)
+	createLibraryTool := mcp.NewTool("create_library", createLibraryOpts...)
 
 	// Items tools
 	itemOpts := append(withABSAuth(),
@@ -278,6 +332,21 @@ func main() {
 	)
 	collectionTool := mcp.NewTool("collection", collectionOpts...)
 
+	createCollectionOpts := append(withABSAuth(),
+		mcp.WithDescription("Create a new collection"),
+		mcp.WithString("library_id", mcp.Required(), mcp.Description("Library ID")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Collection name")),
+		mcp.WithString("description", mcp.Description("Collection description")),
+	)
+	createCollectionTool := mcp.NewTool("create_collection", createCollectionOpts...)
+
+	addToCollectionOpts := append(withABSAuth(),
+		mcp.WithDescription("Add a book to an existing collection"),
+		mcp.WithString("collection_id", mcp.Required(), mcp.Description("Collection ID")),
+		mcp.WithString("book_id", mcp.Required(), mcp.Description("Book ID to add")),
+	)
+	addToCollectionTool := mcp.NewTool("add_to_collection", addToCollectionOpts...)
+
 	// Playlists tools
 	playlistsOpts := append(withABSAuth(), mcp.WithDescription("List all Audiobookshelf playlists"))
 	playlistsTool := mcp.NewTool("playlists", playlistsOpts...)
@@ -287,6 +356,46 @@ func main() {
 		mcp.WithString("playlist_id", mcp.Required(), mcp.Description("Playlist identifier to fetch")),
 	)
 	playlistTool := mcp.NewTool("playlist", playlistOpts...)
+
+	createPlaylistOpts := append(withABSAuth(),
+		mcp.WithDescription("Create a new playlist"),
+		mcp.WithString("library_id", mcp.Required(), mcp.Description("Library ID")),
+		mcp.WithString("name", mcp.Required(), mcp.Description("Playlist name")),
+		mcp.WithString("description", mcp.Description("Playlist description")),
+	)
+	createPlaylistTool := mcp.NewTool("create_playlist", createPlaylistOpts...)
+
+	addToPlaylistOpts := append(withABSAuth(),
+		mcp.WithDescription("Add an item to an existing playlist"),
+		mcp.WithString("playlist_id", mcp.Required(), mcp.Description("Playlist ID")),
+		mcp.WithString("item_id", mcp.Required(), mcp.Description("Library item ID to add")),
+		mcp.WithString("episode_id", mcp.Description("Episode ID (for podcast episodes)")),
+	)
+	addToPlaylistTool := mcp.NewTool("add_to_playlist", addToPlaylistOpts...)
+
+	// Podcast check new episodes
+	checkPodcastEpisodesOpts := append(withABSAuth(),
+		mcp.WithDescription("Check for new episodes for a podcast"),
+		mcp.WithString("podcast_id", mcp.Required(), mcp.Description("Podcast ID to check")),
+	)
+	checkPodcastEpisodesTool := mcp.NewTool("check_podcast_episodes", checkPodcastEpisodesOpts...)
+
+	// Backup creation
+	createBackupOpts := append(withABSAuth(),
+		mcp.WithDescription("Create a server backup"),
+	)
+	createBackupTool := mcp.NewTool("create_backup", createBackupOpts...)
+
+	// Progress tracking
+	updateProgressOpts := append(withABSAuth(),
+		mcp.WithDescription("Update listening progress for a media item"),
+		mcp.WithString("item_id", mcp.Required(), mcp.Description("Library item ID")),
+		mcp.WithNumber("progress", mcp.Required(), mcp.Description("Progress in seconds")),
+		mcp.WithNumber("duration", mcp.Description("Total duration in seconds")),
+		mcp.WithBoolean("is_finished", mcp.Description("Mark as finished")),
+		mcp.WithString("episode_id", mcp.Description("Episode ID (for podcasts)")),
+	)
+	updateProgressTool := mcp.NewTool("update_progress", updateProgressOpts...)
 
 	// Server status/health tools
 	pingOpts := append(withABSAuth(), mcp.WithDescription("Simple health check endpoint"))
@@ -361,6 +470,58 @@ func main() {
 		"episode-downloads",
 		"recent-episodes",
 	}))
+	s.AddTool(createLibraryTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		name, err := request.RequireString("name")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		foldersStr, err := request.RequireString("folders")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		mediaType, err := request.RequireString("media_type")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		// Parse folders from comma-separated string
+		folderPaths := strings.Split(foldersStr, ",")
+		folders := make([]map[string]interface{}, len(folderPaths))
+		for i, path := range folderPaths {
+			folders[i] = map[string]interface{}{
+				"fullPath": strings.TrimSpace(path),
+			}
+		}
+
+		// Build the payload with required fields
+		payload := map[string]interface{}{
+			"name":      name,
+			"folders":   folders,
+			"mediaType": mediaType,
+		}
+
+		// Add optional fields if provided
+		if icon := request.GetString("icon", ""); icon != "" {
+			payload["icon"] = icon
+		}
+		if provider := request.GetString("provider", ""); provider != "" {
+			payload["provider"] = provider
+		}
+
+		body, err := absPOST(ctx, baseURL, token, "/libraries", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
 
 	// Add ABS Items handlers
 	s.AddTool(itemTool, createGETByIDWithSubResourceHandler("/items/%s", "item_id", []string{
@@ -463,10 +624,209 @@ func main() {
 	// Add ABS Collections handlers
 	s.AddTool(collectionsTool, createSimpleGETHandler("/collections"))
 	s.AddTool(collectionTool, createGETByIDHandler("/collections/%s", "collection_id"))
+	s.AddTool(createCollectionTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		libraryID, err := request.RequireString("library_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		name, err := request.RequireString("name")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		payload := map[string]interface{}{
+			"libraryId": libraryID,
+			"name":      name,
+		}
+
+		if description := request.GetString("description", ""); description != "" {
+			payload["description"] = description
+		}
+
+		body, err := absPOST(ctx, baseURL, token, "/collections", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
+	s.AddTool(addToCollectionTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		collectionID, err := request.RequireString("collection_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		bookID, err := request.RequireString("book_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		payload := map[string]interface{}{
+			"id": bookID,
+		}
+
+		body, err := absPOST(ctx, baseURL, token, fmt.Sprintf("/collections/%s/book", collectionID), payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
 
 	// Add ABS Playlists handlers
 	s.AddTool(playlistsTool, createSimpleGETHandler("/playlists"))
 	s.AddTool(playlistTool, createGETByIDHandler("/playlists/%s", "playlist_id"))
+	s.AddTool(createPlaylistTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		libraryID, err := request.RequireString("library_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		name, err := request.RequireString("name")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		payload := map[string]interface{}{
+			"libraryId": libraryID,
+			"name":      name,
+		}
+
+		if description := request.GetString("description", ""); description != "" {
+			payload["description"] = description
+		}
+
+		body, err := absPOST(ctx, baseURL, token, "/playlists", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
+	s.AddTool(addToPlaylistTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		playlistID, err := request.RequireString("playlist_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		itemID, err := request.RequireString("item_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		payload := map[string]interface{}{
+			"libraryItemId": itemID,
+		}
+
+		if episodeID := request.GetString("episode_id", ""); episodeID != "" {
+			payload["episodeId"] = episodeID
+		}
+
+		body, err := absPOST(ctx, baseURL, token, fmt.Sprintf("/playlists/%s/item", playlistID), payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
+
+	// Add Podcast check episodes handler
+	s.AddTool(checkPodcastEpisodesTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		podcastID, err := request.RequireString("podcast_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		body, err := absPOST(ctx, baseURL, token, fmt.Sprintf("/podcasts/%s/check-new-episodes", podcastID), nil)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
+
+	// Add create backup handler
+	s.AddTool(createBackupTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		body, err := absPOST(ctx, baseURL, token, "/backups", nil)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
+
+	// Add progress tracking handler
+	s.AddTool(updateProgressTool, func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		baseURL, token, err := getABSConfig(request)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		itemID, err := request.RequireString("item_id")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		progress, err := request.RequireFloat("progress")
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		payload := map[string]interface{}{
+			"libraryItemId": itemID,
+			"currentTime":   progress,
+		}
+
+		if duration := request.GetFloat("duration", 0); duration > 0 {
+			payload["duration"] = duration
+		}
+
+		if isFinished := request.GetBool("is_finished", false); isFinished {
+			payload["isFinished"] = true
+		}
+
+		if episodeID := request.GetString("episode_id", ""); episodeID != "" {
+			payload["episodeId"] = episodeID
+		}
+
+		body, err := absPOST(ctx, baseURL, token, "/me/progress", payload)
+		if err != nil {
+			return mcp.NewToolResultError(err.Error()), nil
+		}
+
+		return mcp.NewToolResultText(string(body)), nil
+	})
 
 	// Add Server status/health handlers (these are at root level, not /api)
 	s.AddTool(pingTool, createRootGETHandler("/ping"))
