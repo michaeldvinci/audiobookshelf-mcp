@@ -38,6 +38,34 @@ func setupMockABSServer() *httptest.Server {
 
 	// Libraries endpoints
 	mux.HandleFunc("/api/libraries", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			// Handle POST - create library
+			var payload map[string]interface{}
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				http.Error(w, "Invalid JSON", http.StatusBadRequest)
+				return
+			}
+
+			// Validate required fields
+			if _, ok := payload["name"]; !ok {
+				http.Error(w, "name is required", http.StatusBadRequest)
+				return
+			}
+			if _, ok := payload["folders"]; !ok {
+				http.Error(w, "folders is required", http.StatusBadRequest)
+				return
+			}
+
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"id":      "new-lib-123",
+				"name":    payload["name"],
+				"folders": payload["folders"],
+			})
+			return
+		}
+
+		// Handle GET - list libraries
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"libraries": []map[string]string{
@@ -743,5 +771,202 @@ func TestContextCancellation(t *testing.T) {
 	_, err := absGET(ctx, testServer.URL, "token", "/test")
 	if err == nil {
 		t.Error("expected error from cancelled context, got nil")
+	}
+}
+
+func TestABSPOST(t *testing.T) {
+	mockServer := setupMockABSServer()
+	defer mockServer.Close()
+
+	tests := []struct {
+		name        string
+		path        string
+		payload     map[string]interface{}
+		expectError bool
+		checkBody   func([]byte) error
+	}{
+		{
+			name: "successful POST with payload",
+			path: "/api/libraries",
+			payload: map[string]interface{}{
+				"name": "Test Library",
+				"folders": []map[string]interface{}{
+					{"fullPath": "/audiobooks"},
+				},
+			},
+			expectError: false,
+			checkBody: func(body []byte) error {
+				if !strings.Contains(string(body), "new-lib-123") {
+					return fmt.Errorf("expected 'new-lib-123' in body, got: %s", string(body))
+				}
+				if !strings.Contains(string(body), "Test Library") {
+					return fmt.Errorf("expected 'Test Library' in body, got: %s", string(body))
+				}
+				return nil
+			},
+		},
+		{
+			name:        "POST with nil payload",
+			path:        "/api/libraries",
+			payload:     nil,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body, err := absPOST(context.Background(), mockServer.URL, "test-token", tt.path, tt.payload)
+
+			if tt.expectError {
+				if err == nil {
+					t.Error("expected error, got nil")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if tt.checkBody != nil {
+					if err := tt.checkBody(body); err != nil {
+						t.Error(err)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestCreateLibraryHandler(t *testing.T) {
+	mockServer := setupMockABSServer()
+	defer mockServer.Close()
+
+	baseURL := strings.TrimSuffix(mockServer.URL, "/api")
+
+	tests := []struct {
+		name        string
+		params      map[string]interface{}
+		expectError bool
+		checkResult func(*mcp.CallToolResult) error
+	}{
+		{
+			name: "create library successfully",
+			params: map[string]interface{}{
+				"base_url":   baseURL,
+				"token":      "test-token",
+				"name":       "My Audiobooks",
+				"folders":    "/audiobooks,/more-audiobooks",
+				"icon":       "audiobooks",
+				"media_type": "book",
+			},
+			expectError: false,
+			checkResult: func(result *mcp.CallToolResult) error {
+				if len(result.Content) == 0 {
+					return fmt.Errorf("expected content, got empty")
+				}
+				// Check that the response contains the library name
+				content := result.Content[0]
+				if textContent, ok := content.(mcp.TextContent); ok {
+					if !strings.Contains(textContent.Text, "My Audiobooks") {
+						return fmt.Errorf("expected 'My Audiobooks' in response, got: %s", textContent.Text)
+					}
+				}
+				return nil
+			},
+		},
+		{
+			name: "missing required name parameter",
+			params: map[string]interface{}{
+				"base_url": baseURL,
+				"token":    "test-token",
+				"folders":  "/audiobooks",
+			},
+			expectError: true,
+		},
+		{
+			name: "missing required folders parameter",
+			params: map[string]interface{}{
+				"base_url": baseURL,
+				"token":    "test-token",
+				"name":     "My Library",
+			},
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create a handler function that matches what's in main.go
+			handler := func(ctx context.Context, request mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+				baseURL, token, err := getABSConfig(request)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				name, err := request.RequireString("name")
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				foldersStr, err := request.RequireString("folders")
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				folderPaths := strings.Split(foldersStr, ",")
+				folders := make([]map[string]interface{}, len(folderPaths))
+				for i, path := range folderPaths {
+					folders[i] = map[string]interface{}{
+						"fullPath": strings.TrimSpace(path),
+					}
+				}
+
+				payload := map[string]interface{}{
+					"name":    name,
+					"folders": folders,
+				}
+
+				if icon := request.GetString("icon", ""); icon != "" {
+					payload["icon"] = icon
+				}
+				if mediaType := request.GetString("media_type", ""); mediaType != "" {
+					payload["mediaType"] = mediaType
+				}
+				if provider := request.GetString("provider", ""); provider != "" {
+					payload["provider"] = provider
+				}
+
+				body, err := absPOST(ctx, baseURL, token, "/libraries", payload)
+				if err != nil {
+					return mcp.NewToolResultError(err.Error()), nil
+				}
+
+				return mcp.NewToolResultText(string(body)), nil
+			}
+
+			request := makeRequest(tt.params)
+			result, err := handler(context.Background(), request)
+
+			if tt.expectError {
+				if err != nil || (result != nil && result.IsError) {
+					// Expected error
+					return
+				}
+				t.Error("expected error, got success")
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+				if result == nil {
+					t.Error("expected result, got nil")
+				}
+				if result.IsError {
+					t.Errorf("result returned error: %v", result)
+				}
+				if tt.checkResult != nil {
+					if err := tt.checkResult(result); err != nil {
+						t.Error(err)
+					}
+				}
+			}
+		})
 	}
 }
