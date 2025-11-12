@@ -151,6 +151,9 @@ Add this to your Claude Desktop configuration file:
   - `stats=true` - Get library statistics
   - `episode-downloads=true` - Get episode downloads for the library
   - `recent-episodes=true` - Get recent episodes for the library
+- **create_library** - Create a new library
+  - Required: `name`, `folders` (comma-separated paths), `media_type` (book or podcast)
+  - Optional: `icon`, `provider`
 
 ### Items
 
@@ -166,11 +169,22 @@ Add this to your Claude Desktop configuration file:
 
 - **collections** - List all collections
 - **collection** - Get a single collection by ID
+- **create_collection** - Create a new collection
+  - Required: `library_id`, `name`
+  - Optional: `description`
+- **add_to_collection** - Add a book to an existing collection
+  - Required: `collection_id`, `book_id`
 
 ### Playlists
 
 - **playlists** - List all playlists
 - **playlist** - Get a single playlist by ID
+- **create_playlist** - Create a new playlist
+  - Required: `library_id`, `name`
+  - Optional: `description`
+- **add_to_playlist** - Add an item to an existing playlist
+  - Required: `playlist_id`, `item_id`
+  - Optional: `episode_id` (for podcast episodes)
 
 ### User
 
@@ -195,6 +209,18 @@ Add this to your Claude Desktop configuration file:
   - `downloads=true` - Get downloads for the podcast
   - `search-episode=true` - Search for episodes in the podcast
   - `episode_id=<id>` - Get a specific episode by ID
+- **check_podcast_episodes** - Check for new episodes for a podcast
+  - Required: `podcast_id`
+
+### Progress Tracking
+
+- **update_progress** - Update listening progress for a media item
+  - Required: `item_id`, `progress` (in seconds)
+  - Optional: `duration` (in seconds), `is_finished` (boolean), `episode_id` (for podcasts)
+
+### Backups
+
+- **create_backup** - Create a server backup
 
 ## Tool Parameters
 
@@ -213,13 +239,22 @@ This is useful if you need to access multiple Audiobookshelf instances or prefer
 
 Once configured, you can ask your AI assistant questions like:
 
+**Reading and browsing:**
 - "Show me all my audiobook libraries"
 - "What items are in my Fiction library?"
 - "Get details about the author with ID abc123"
 - "List all my playlists"
 - "What's in my Currently Reading collection?"
 
-The AI assistant will use the appropriate MCP tools to fetch the information from your Audiobookshelf instance.
+**Creating and managing:**
+- "Create a new collection called 'Summer Reads' in my library"
+- "Add this book to my 'Currently Reading' collection"
+- "Create a new playlist for my favorite sci-fi audiobooks"
+- "Check for new podcast episodes"
+- "Update my progress to 45 minutes on this audiobook"
+- "Create a backup of my server"
+
+The AI assistant will use the appropriate MCP tools to fetch information and manage your Audiobookshelf instance.
 
 ## Development
 
