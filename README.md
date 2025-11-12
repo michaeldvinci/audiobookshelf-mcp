@@ -2,6 +2,12 @@
 
 A Model Context Protocol (MCP) server that provides tools to interact with your [Audiobookshelf](https://www.audiobookshelf.org/) instance. Access your libraries, audiobooks, podcasts, authors, collections, and playlists through AI assistants that support MCP.
 
+## Disclaimer
+
+**USE AT YOUR OWN RISK:** This software is provided "as is" without warranty of any kind. The author is not responsible for any misuse, accidents, data loss, or any other issues that may arise from using this software. Users are solely responsible for ensuring proper configuration and usage of this tool with their Audiobookshelf instance.
+
+---
+
 ## Features
 
 - List and retrieve libraries with optional sub-resources (items, authors)
@@ -275,7 +281,7 @@ To add a new tool:
 
 ## License
 
-[Your License Here]
+GNU General Public
 
 ## Contributing
 
